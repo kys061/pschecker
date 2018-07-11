@@ -1,15 +1,28 @@
+#!/usr/bin/python2.7
+# -*- coding: utf-8 -*-
+# write by yskang(kys061@gmail.com)
+
 import subprocess
 import time
 from logging.handlers import RotatingFileHandler
 import logging
 import sys
 
+from saisei.saisei_api import saisei_api
+
+stm_ver = r'7.2'
 stm_id = r'monitor_only'
 stm_pass = r'Monitor_Only#1'
 stm_host = r'localhost'
+stm_port = r'5000'
 stm_script_path = r'/opt/stm/target/pcli/stm_cli.py'
+stm_flow_path = 'configurations/running/flows/'
+stm_interface_path = r'configurations/running/interfaces/'
+
 stm_start = False
 stm_chk_interval = 5
+thread_chk_count = 0
+
 logger = None
 
 MUL = 3
@@ -37,7 +50,12 @@ def get_command(cmd, param=' '):
 
 
 def get_pid(name):
-    return subprocess.check_output("sudo ps -elL |grep %s" % name, shell=True)
+    try:
+        subprocess.check_output("sudo ps -elL |grep %s" % name, shell=True)
+    except subprocess.CalledProcessError:
+        return False
+    else:
+        return True
 
 
 def subprocess_open(command):
@@ -51,22 +69,39 @@ def subprocess_open(command):
         return stdout_data, stderr_data
 
 
-def reboot_system(command):
+def reboot_system():
     try:
-        subprocess_open(command)
+        subprocess_open('sudo reboot')
     except Exception as e:
         logger.error("reboot system() cannot be executed, {}".format(e))
         pass
 
 
+def get_interface_state_url(name):
+    return "{}/{}?level=brief&select=state".format(stm_interface_path, name)
+
+
+def get_interface_state(name):
+    api = saisei_api(server=stm_host, port=stm_port, user=stm_id, password=stm_pass)
+    rest_url = get_interface_state_url(name)
+    state = api.rest.get(rest_url)['collection'][0]['state']
+    return state
+
+
 def main():
     global stm_start
+    global thread_chk_count
+
     make_logger()
     time.sleep(1)
 
     while not stm_start:
-        ints_enable = subprocess_open(
-            get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"))[0].split()
+        if stm_ver == '7.2':
+            ints_enable = subprocess_open(
+                get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"))[0].split()
+        else:
+            ints_enable = subprocess_open(
+                get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"))[0].split()
         enable_count = 0
         try:
             ints_count = len(ints_enable)
@@ -74,7 +109,7 @@ def main():
             logger.error("cannot get length of ints_count, {}".format(e))
         else:
             for int_enable in ints_enable:
-                if 'Enable' in int_enable:
+                if 'Enable' or 'enable' in int_enable:
                     enable_count += 1
 
             if enable_count == ints_count:
@@ -86,9 +121,8 @@ def main():
     while stm_start:
         parameter = subprocess_open(
             get_command(r"show parameter", r"|grep 'interfaces_per_core' |awk '{print $2}'"))[0].strip()
-        thread_chk_count = 0
         logger.info("STM Thread Checking Start...")
-        thread_count = 0
+
         if int(parameter) >= 2:
             thread_count = 2
             _interfaces = subprocess_open(
@@ -113,11 +147,12 @@ def main():
                 else:
                     logger.info('{} threads is alive,  No need to reboot!'.format(_int))
         else:
+            thread_count = 10
             logger.info('Interfaces per core is 0, Please check parameters...')
 
         if thread_chk_count > thread_count*MUL:
             logger.info('No stm threads : start rebooting now...')
-            reboot_system('sudo reboot')
+            reboot_system()
         time.sleep(stm_chk_interval)
 
 
