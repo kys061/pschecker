@@ -8,10 +8,13 @@ from logging.handlers import RotatingFileHandler
 import logging
 import sys
 import re
+from saisei.saisei_api import saisei_api
 
 stm_ver = r'7.2'
-stm_id = r'cli_admin'
-stm_pass = r'cli_admin'
+# stm_id = r'monitor_only'
+# stm_pass = r'Monitor_Only#1'
+stm_id = r'admin'
+stm_pass = r'admin'
 stm_host = r'localhost'
 stm_port = r'5000'
 stm_script_path = r'/opt/stm/target/pcli/stm_cli.py'
@@ -27,7 +30,7 @@ logger = None
 
 err_lists = ['Cannot connect to server', 'does not exist', 'no matching objects', 'waiting for server']
 
-MUL = 30
+MUL = 3
 LOG_FILENAME = r'/var/log/pschecker.log'
 
 
@@ -81,6 +84,13 @@ def reboot_system():
 
 def get_interface_state_url(name):
     return "{}/{}?level=brief&select=state".format(stm_interface_path, name)
+
+
+def get_interface_state(name):
+    api = saisei_api(server=stm_host, port=stm_port, user=stm_id, password=stm_pass)
+    rest_url = get_interface_state_url(name)
+    state = api.rest.get(rest_url)['collection'][0]['state']
+    return state
 
 
 def check_error(raw_data):

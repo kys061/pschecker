@@ -28,13 +28,13 @@ logger = None
 err_lists = ['Cannot connect to server', 'does not exist', 'no matching objects', 'waiting for server']
 
 MUL = 30
-LOG_FILENAME = r'/var/log/pschecker.log'
+LOG_FILENAME = r'/var/log/thread_monitor.log'
 
 
 def make_logger():
     global logger
     try:
-        logger = logging.getLogger('saisei.pschecker')
+        logger = logging.getLogger('saisei.thread_monitor')
         fh = RotatingFileHandler(LOG_FILENAME, 'a', 50 * 1024 * 1024, 4)
         logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -77,10 +77,6 @@ def reboot_system():
     except Exception as e:
         logger.error("reboot system() cannot be executed, {}".format(e))
         pass
-
-
-def get_interface_state_url(name):
-    return "{}/{}?level=brief&select=state".format(stm_interface_path, name)
 
 
 def check_error(raw_data):
