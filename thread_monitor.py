@@ -53,6 +53,7 @@ def logging_line():
     logger.info("=================================")
 
 def get_command(cmd, param=' '):
+    # logger.info('echo \'{0} \' |sudo {1} {2}:{3}@{4} {5}'.format(cmd, stm_script_path, stm_id, stm_pass, stm_host, param))
     return 'echo \'{0} \' |sudo {1} {2}:{3}@{4} {5}'\
         .format(cmd, stm_script_path, stm_id, stm_pass, stm_host, param)
 
@@ -78,8 +79,9 @@ def subprocess_open(command, timeout):
             if p_open.poll() is not None:
                 (stdout_data, stderr_data) = p_open.communicate()
                 return stdout_data, stderr_data
-        p_open.kill()
-        return [False]
+            if t == timeout:
+                p_open.kill()
+                return [False]
 
 
 def reboot_system():
@@ -121,8 +123,6 @@ def get_stm_version():
             logger.error("reboot system() cannot be executed, {}".format(e))
             pass
         else:
-            # print('{}:V7.3'.format(stm_version.strip()))
-            # print(stm_version.strip() == 'V7.3')
             stm_version = stm_version.strip()
             return stm_version
     else:
@@ -168,7 +168,7 @@ def check_stm_status():
     global version
 
     logger.info("The version of stm is now {}".format(version))
-    # print(version == 'V7.3')
+
     if version == "V7.3":
         if check_subprocess_data(subprocess_open(
             get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]):
@@ -176,7 +176,7 @@ def check_stm_status():
                 get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]
         else:
             return False
-    elif version is "V7.1":
+    elif version == "V7.1":
         if check_subprocess_data(subprocess_open(
             get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"), 10)[0]):
             raw_data = subprocess_open(
@@ -194,12 +194,14 @@ def check_stm_status():
 def check_dpdk_interface(enabled_ints):
     try:
         global is_stm_started
+
         enable_count = 0
         enabled_ints.split()
         ints_count = len(enabled_ints)
     except Exception as e:
         logger.error("cannot get length of ints_count, {}".format(e))
         logging_line()
+        return False
     else:
         for enabled_int in enabled_ints:
             if 'Enable' or 'enable' in enabled_int:
@@ -228,6 +230,7 @@ def check_stm_enable_count():
                     get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]):
                 enabled_ints = subprocess_open(
                     get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]
+                return check_dpdk_interface(enabled_ints)
             else:
                 return False
         elif version == 'V7.1':
@@ -235,13 +238,13 @@ def check_stm_enable_count():
                 get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"), 10)[0]):
                 enabled_ints = subprocess_open(
                     get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"), 10)[0]
+                return check_dpdk_interface(enabled_ints)
             else:
                 return False
         else:
             logger.error("The version of stm is not correct.. plz check.")
             logging_line()
             return False
-        return check_dpdk_interface(enabled_ints)
     else:
         is_stm_started = False
         logger.error("STM is error or stm's id/password is wrong, please check stm, error stats: {}".format(is_stm_err))
@@ -251,52 +254,73 @@ def check_stm_enable_count():
 
 
 def check_interface_thread():
-    global thread_chk_count
+    global thread_chk_count, is_stm_started
 
     logger.info("STM Thread Checking is Started...")
 
     if check_subprocess_data(subprocess_open(
-        get_command(r"show parameter", r"|grep 'interfaces_per_core' |awk '{print $2}'"), 10)[0].strip()):
-        parameter = subprocess_open(
-            get_command(r"show parameter", r"|grep 'interfaces_per_core' |awk '{print $2}'"), 10)[0].strip()
-    else:
-        return False
+        get_command(r"show parameter", r"|grep 'interfaces_per_core' |awk '{print $2}'"), 10)[0]):
+        try:
+            parameter = subprocess_open(
+                get_command(r"show parameter", r"|grep 'interfaces_per_core' |awk '{print $2}'"), 10)[0].strip()
+        except Exception as e:
+            logger.error("Cannot strip() parameter data.")
+            parameter = "0"
+            pass
 
-    if int(parameter) >= 2:
-        thread_count = 2
-        _interfaces = subprocess_open(
-            get_command(r"show int", r"| grep 'Ethernet' |grep 'External' |awk '{{ print $1 }}'"), 10)[0].split('\n')
-        interfaces = [_int for _int in _interfaces if len(_int) > 0]
-
-        for _int in interfaces:
-            if not get_pid(_int):
-                logger.info('no {} threads : will start rebooting...'.format(_int))
-                thread_chk_count += 1
+        if int(parameter) >= 2:
+            thread_count = 2
+            if check_subprocess_data(subprocess_open(
+                get_command(r"show int", r"| grep 'Ethernet' |grep 'External' |awk '{{ print $1 }}'"), 10)[0]):
+                try:
+                    _interfaces = subprocess_open(
+                        get_command(r"show int", r"| grep 'Ethernet' |grep 'External' |awk '{{ print $1 }}'"), 10)[0].split('\n')
+                    interfaces = [_int for _int in _interfaces if len(_int) > 0]
+                    for _int in interfaces:
+                        if not get_pid(_int):
+                            logger.info('no {} threads : will start rebooting...'.format(_int))
+                            thread_chk_count += 1
+                            logging_line()
+                        else:
+                            logger.info('{} threads is alive,  No need to reboot!'.format(_int))
+                            logging_line()
+                except Exception as e:
+                    logger.error("Cannot split() interface data.")
+                    pass
+            else:
+                logger.error('Thread_monitor cannot get interfaces info from stm server, please check!!')
+        elif int(parameter) == 1:
+            thread_count = 4
+            if check_subprocess_data(subprocess_open(
+                get_command(r"show int", r"| grep 'Ethernet' |awk '{{ print $1 }}'"), 10)[0]):
+                try:
+                    _interfaces = subprocess_open(
+                        get_command(r"show int", r"| grep 'Ethernet' |awk '{{ print $1 }}'"), 10)[0].split('\n')
+                    interfaces = [_int for _int in _interfaces if len(_int) > 0]
+                    for _int in interfaces:
+                        if not get_pid(_int):
+                            logger.info('no {} threads : will start rebooting...'.format(_int))
+                            thread_chk_count += 1
+                        else:
+                            logger.info('{} threads is alive,  No need to reboot!'.format(_int))
+                except Exception as e:
+                    logger.error("Cannot split() interface data.")
+                    pass
                 logging_line()
             else:
-                logger.info('{} threads is alive,  No need to reboot!'.format(_int))
-                logging_line()
-    elif int(parameter) == 1:
-        thread_count = 4
-        _interfaces = subprocess_open(
-            get_command(r"show int", r"| grep 'Ethernet' |awk '{{ print $1 }}'"), 10)[0].split('\n')
-        interfaces = [_int for _int in _interfaces if len(_int) > 0]
-        for _int in interfaces:
-            if not get_pid(_int):
-                logger.info('no {} threads : will start rebooting...'.format(_int))
-                thread_chk_count += 1
-            else:
-                logger.info('{} threads is alive,  No need to reboot!'.format(_int))
-        logging_line()
-    else:
-        thread_count = 10
-        logger.info('Interfaces per core is 0, Please check parameters...')
-        logging_line()
+                logger.error('Thread_monitor cannot get interfaces info from stm server, please check!!')
+        else:
+            thread_count = 10
+            logger.info('Interfaces per core is 0, Please check parameters...')
+            logging_line()
 
-    if thread_chk_count > thread_count * MUL:
-        logger.info('No stm threads : start rebooting now...')
-        logging_line()
-        reboot_system()
+        if thread_chk_count > thread_count * MUL:
+            logger.info('No stm threads : start rebooting now...')
+            logging_line()
+            reboot_system()
+    else:
+        is_stm_started = False
+        logger.error('Thread_monitor cannot get interfaces info from stm server, please check!!')
 
 
 def main():
@@ -304,16 +328,13 @@ def main():
     global is_stm_started, is_stm_err
     global thread_chk_count, apache_restart_count
 
-    make_logger()
-    time.sleep(1)
-
     while not is_stm_started:
         if check_stm_status():
             check_stm_enable_count()
             time.sleep(stm_chk_interval)
         time.sleep(30)
 
-    while is_stm_started:
+    while True:
         if check_stm_status():
             check_stm_enable_count()
             time.sleep(stm_chk_interval)
@@ -327,12 +348,12 @@ def main():
                 apache_restart_count = 0
                 reboot_system()
             else:
+                logger.info("Try restart apache, count: {}".format(apache_restart_count))
+                logging_line()
                 restart_apache()
 
-
-### pre-executed
+make_logger()
 version = get_stm_version()
-###
 
 if __name__ == "__main__":
     try:
@@ -342,3 +363,6 @@ if __name__ == "__main__":
         print("\r\nThe script is terminated by user interrupt!")
         print("Bye!!")
         sys.exit()
+    except Exception as e:
+        logger.error("main() cannot be running by some error, {}".format(e))
+        pass
