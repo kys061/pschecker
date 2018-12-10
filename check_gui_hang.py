@@ -10,6 +10,14 @@ import sys
 import re
 from time import sleep
 
+import smtplib
+from email.MIMEMultipart import MIMEMultipart
+from email.MIMEText import MIMEText
+
+### user config ###
+use_email = True
+###
+
 stm_ver = r'7.3'
 stm_id = r'cli_admin'
 stm_pass = r'cli_admin'
@@ -48,6 +56,28 @@ def make_logger():
         print('cannot make logger, please check system, {}'.format(e))
     else:
         logger.info("***** logger starting %s *****" % (sys.argv[0]))
+
+
+def sendemail():
+    try:
+        server=smtplib.SMTP('smtp.gmail.com:587')
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login('reports@saisei.com','Report1ng')
+        from_addr='reports@saisei.com'
+        to_addr='kys061@gmail.com'
+        msg=MIMEMultipart()
+        msg['From']=from_addr
+        msg['To']=to_addr
+        msg['Subject']='Dell Rel7.3-NHNTestServer ALERT'
+        body='GUI IS NOT RESPONDING on Server'
+        msg.attach(MIMEText(body,'plain'))
+        text=msg.as_string()
+        server.sendmail(from_addr,to_address,text)
+        server.close()
+    except Exception as e:
+        logger.error('cannot send email, please check system, {}'.format(e))
 
 
 def logging_line():
@@ -165,7 +195,7 @@ def check_data_error(raw_data):
         return False
 
 def check_stm_status():
-    global is_stm_err, is_stm_started
+    global is_stm_err
     global version
 
     logger.info("The version of stm is now {}".format(version))
@@ -176,20 +206,16 @@ def check_stm_status():
             get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]):
             raw_data = subprocess_open(
                 get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]
-            is_stm_started = True
             return check_data_error(raw_data)
         else:
-            is_stm_started = False
             return False
     elif version == "V7.1":
         if check_subprocess_data(subprocess_open(
             get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"), 10)[0]):
             raw_data = subprocess_open(
                 get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"), 10)[0]
-            is_stm_started = True
             return check_data_error(raw_data)
         else:
-            is_stm_started = False
             return False
     else:
         logger.error("The version of stm is not correct.. plz check.")
@@ -200,6 +226,7 @@ def check_stm_status():
 def check_dpdk_interface(enabled_ints):
     try:
         global is_stm_started
+
         enable_count = 0
         enabled_ints.split()
         ints_count = len(enabled_ints)
@@ -224,7 +251,8 @@ def check_dpdk_interface(enabled_ints):
             return False
 
 def check_stm_enable_count():
-    global is_stm_started, is_stm_err
+    global is_stm_started
+    global is_stm_err
     global version
 
     logger.info("STM status checking is started...")
@@ -234,20 +262,16 @@ def check_stm_enable_count():
                     get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]):
                 enabled_ints = subprocess_open(
                     get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$6}'"), 10)[0]
-                is_stm_started = True
                 return check_dpdk_interface(enabled_ints)
             else:
-                is_stm_started = False
                 return False
         elif version == 'V7.1':
             if check_subprocess_data(subprocess_open(
                 get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"), 10)[0]):
                 enabled_ints = subprocess_open(
                     get_command(r"show int", "| egrep '(Socket|Ethernet)' |awk '{print $1\",\"$4}'"), 10)[0]
-                is_stm_started = True
                 return check_dpdk_interface(enabled_ints)
             else:
-                is_stm_started = False
                 return False
         else:
             logger.error("The version of stm is not correct.. plz check.")
@@ -339,6 +363,10 @@ def check_interface_thread():
             logger.info('Interfaces per core is 0, Please check parameters...')
             logging_line()
 
+        if thread_chk_count > 3:
+            if use_email:
+                sendemail()
+
         if thread_chk_count > thread_count * MUL:
             logger.info('No stm threads : start rebooting now...')
             logging_line()
@@ -369,6 +397,8 @@ def main():
             time.sleep(stm_chk_interval)
         else:
             logger.error("STM or APACHE is not running, Please check admin.")
+            if use_email:
+                sendemail()
             if apache_restart_count > 7:
                 apache_restart_count = 0
                 reboot_system()
