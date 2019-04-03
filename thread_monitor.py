@@ -27,6 +27,7 @@ is_stm_err = True
 stm_chk_interval = 1
 thread_chk_count = 0
 apache_restart_count = 0
+stm_restart_count = 0
 
 logger = None
 
@@ -94,6 +95,16 @@ def reboot_system():
         pass
 
 
+def restart_stm():
+    global stm_restart_count
+    try:
+        logger.info("Try stm restarting")
+        subprocess_open('sudo reboot', 10)
+    except Exception as e:
+        logger.error("reboot system() cannot be executed, {}".format(e))
+        pass
+
+
 def restart_apache():
     try:
         global version
@@ -150,14 +161,19 @@ def check_subprocess_data(sub):
 def check_data_error(raw_data):
     global is_stm_err
 
-    for err in err_lists:
-        if err in raw_data:
-            is_stm_err = True
-            err_contents = re.sub(r"\n", "", err)
-            logger.error('failed from rest cli, msg : {}'.format(err_contents))
-            logging_line()
-        else:
-            is_stm_err = False
+    try:
+        _rawdata_iterator = iter(raw_data)
+    except TypeError as te:
+        logger.error('raw_data is not iterable, {}'.format(te))
+    else:
+        for err in err_lists:
+            if err in raw_data:
+                is_stm_err = True
+                err_contents = re.sub(r"\n", "", err)
+                logger.error('failed from rest cli, msg : {}'.format(err_contents))
+                logging_line()
+            else:
+                is_stm_err = False
 
     if not is_stm_err:
         return True
@@ -351,7 +367,7 @@ def check_interface_thread():
 def main():
     global version
     global is_stm_started, is_stm_err
-    global thread_chk_count, apache_restart_count
+    global thread_chk_count, apache_restart_count, stm_restart_count
 
     while not is_stm_started:
         if check_stm_status():
